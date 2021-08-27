@@ -1,8 +1,9 @@
-import { json, Request, Response } from 'express';
+import { Request, Response } from 'express';
 import axios from 'axios';
 import { token } from 'morgan';
 import * as jwt from 'jsonwebtoken';
-const jwkToPem = require('jwk-to-pem');
+import jws from 'jws';
+import base64Url from 'base64url';
 
 declare module 'express-session' {
   interface SessionData {
@@ -12,45 +13,69 @@ declare module 'express-session' {
   }
 }
 
-interface TokenHeader {
-  kid: string;
-}
-
 // Display detail page for a specific User.
 export async function user_controller(req: Request, res: Response) {
-  // const instanceId = (
-  //   await axios.get('http://169.254.169.254/latest/meta-data/instance-id')
-  // ).data;
-  const instanceId = 'dummy-instanceId';
+  const instanceId = (
+    await axios.get('http://169.254.169.254/latest/meta-data/instance-id')
+  ).data;
+  // const instanceId = 'dummy-instanceId';
   const encodedJwt = req.header('x-amzn-oidc-data');
   if (!encodedJwt) {
     res.send('encodedJwt is undefined').status(200);
     return;
   }
-  const jwtHeaders = encodedJwt.split('.')[0];
-  if (!jwtHeaders) {
-    res.send('jwtHeaders is undefined').status(200);
+  let base64UrlToken = base64Url.fromBase64(encodedJwt);
+  const decoded = jwt.decode(base64UrlToken, { complete: true });
+  if (!decoded) {
     return;
   }
-  const decodedJwtHeaders = Buffer.from(jwtHeaders, 'base64').toString('utf8');
-  const decodedJson = JSON.parse(decodedJwtHeaders) as TokenHeader;
-  const kid = decodedJson.kid;
+  const { kid } = decoded.header;
 
-  const pubReq =
-    'https://public-keys.auth.elb.ap-northeast-1.amazonaws.com/' + kid;
-  const pem = await axios.get(pubReq);
-  const pubKey = pem.data;
+  const uri = `https://public-keys.auth.elb.ap-northeast-1.amazonaws.com/${kid}`;
 
-  const payload = jwt.verify(
-    encodedJwt,
-    pubKey,
-    { algorithms: ['RS256'] },
-    function (err, decodedToken) {
-      console.log(decodedToken);
+  const response = await await axios.get(uri);
+  const key = response.data;
+
+  try {
+    const verify = jws.verify(encodedJwt, 'ES256', key);
+    if (!verify) {
+      return null;
     }
-  );
-  console.log(payload);
-  const userId = 'hogehoge';
+    //   // var clockTimestamp = Math.floor(Date.now() / 1000);
+    //   // if (clockTimestamp >= decoded.header.exp) {
+    //   //   // Token expired.
+    //   //   return null;
+    //   // }
+  } catch (err) {
+    console.error(err);
+    throw err;
+  }
+
+  const userId = decoded.payload.username;
+
+  // NG
+  // const jwtHeaders = encodedJwt.split('.')[0];
+  // if (!jwtHeaders) {
+  //   res.send('jwtHeaders is undefined').status(200);
+  //   return;
+  // }
+  // const decodedJwtHeaders = Buffer.from(jwtHeaders, 'base64').toString('utf8');
+  // const decodedJson = JSON.parse(decodedJwtHeaders) as TokenHeader;
+  // // const kid = decodedJson.kid;
+
+  // const uri =
+  //   'https://public-keys.auth.elb.ap-northeast-1.amazonaws.com/' + kid;
+  // const response = await axios.get(uri);
+  // const key = response.data;
+  // const payload = jwt.verify(
+  //   encodedJwt,
+  //   key,
+  //   { algorithms: ['ES256'] },
+  //   function (err, decodedToken) {
+  //     console.log(decodedToken);
+  //   }
+  // );
+
   const session = req.session;
   if (!!session.views && session.userId === userId) {
     // セッションあり、ユーザー名が正しければ回数を増やす
