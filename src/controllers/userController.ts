@@ -13,18 +13,8 @@ declare module 'express-session' {
   }
 }
 
-// Display detail page for a specific User.
-export async function user_controller(req: Request, res: Response) {
-  const instanceId = (
-    await axios.get('http://169.254.169.254/latest/meta-data/instance-id')
-  ).data;
-  // const instanceId = 'dummy-instanceId';
-  const encodedJwt = req.header('x-amzn-oidc-data');
-  if (!encodedJwt) {
-    res.send('encodedJwt is undefined').status(200);
-    return;
-  }
-  let base64UrlToken = base64Url.fromBase64(encodedJwt);
+async function verifyToken(token: string) {
+  let base64UrlToken = base64Url.fromBase64(token);
   const decoded = jwt.decode(base64UrlToken, { complete: true });
   if (!decoded) {
     return;
@@ -37,44 +27,34 @@ export async function user_controller(req: Request, res: Response) {
   const key = response.data;
 
   try {
-    const verify = jws.verify(encodedJwt, 'ES256', key);
+    const verify = jws.verify(token, 'ES256', key);
     if (!verify) {
       return null;
     }
-    //   // var clockTimestamp = Math.floor(Date.now() / 1000);
-    //   // if (clockTimestamp >= decoded.header.exp) {
-    //   //   // Token expired.
-    //   //   return null;
-    //   // }
   } catch (err) {
     console.error(err);
     throw err;
   }
 
-  const userId = decoded.payload.username;
+  return decoded.payload;
+}
 
-  // NG
-  // const jwtHeaders = encodedJwt.split('.')[0];
-  // if (!jwtHeaders) {
-  //   res.send('jwtHeaders is undefined').status(200);
-  //   return;
-  // }
-  // const decodedJwtHeaders = Buffer.from(jwtHeaders, 'base64').toString('utf8');
-  // const decodedJson = JSON.parse(decodedJwtHeaders) as TokenHeader;
-  // // const kid = decodedJson.kid;
+// Display detail page for a specific User.
+export async function user_controller(req: Request, res: Response) {
+  const instanceId = (
+    await axios.get('http://169.254.169.254/latest/meta-data/instance-id')
+  ).data;
+  const encodedJwt = req.header('x-amzn-oidc-data');
+  if (!encodedJwt) {
+    res.send('encodedJwt is undefined').status(200);
+    return;
+  }
 
-  // const uri =
-  //   'https://public-keys.auth.elb.ap-northeast-1.amazonaws.com/' + kid;
-  // const response = await axios.get(uri);
-  // const key = response.data;
-  // const payload = jwt.verify(
-  //   encodedJwt,
-  //   key,
-  //   { algorithms: ['ES256'] },
-  //   function (err, decodedToken) {
-  //     console.log(decodedToken);
-  //   }
-  // );
+  const payload = await verifyToken(encodedJwt);
+  if (!payload) {
+    return;
+  }
+  const userId = payload.username;
 
   const session = req.session;
   if (!!session.views && session.userId === userId) {
